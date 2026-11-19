@@ -3,6 +3,9 @@
 #   사용법: bash scripts/deploy.sh
 set -euo pipefail
 
+# CloudShell 기본 언어 설정에서 템플릿의 한글 설명이 ??로 깨지지 않도록 UTF-8로 고정
+export LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONIOENCODING=utf-8
+
 STACK_NAME="${STACK_NAME:-cnu-haksa-dev}"
 REGION="${REGION:-ap-northeast-2}"
 STAGE="${STAGE:-dev}"
