@@ -1,0 +1,3 @@
+# Windows에서 커밋해도 CloudShell(리눅스)에서 스크립트가 깨지지 않도록 줄바꿈을 LF로 고정
+* text=auto eol=lf
+*.png binary

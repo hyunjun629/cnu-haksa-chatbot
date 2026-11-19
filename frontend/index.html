@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CNU 학사도우미</title>
+  <style>
+    :root {
+      --bg: #f5f7fa; --card: #ffffff; --text: #1f2933; --muted: #616e7c;
+      --line: #d9e2ec; --accent: #1a5fb4; --ok: #2e7d32; --bad: #c62828;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 16px 48px; }
+    header h1 { margin: 0 0 4px; font-size: 24px; }
+    header p { margin: 0; color: var(--muted); font-size: 14px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
+              font-size: 13px; padding: 4px 10px; border-radius: 999px; background: #e4e7eb; }
+    .status.ok { background: #e3f2e5; color: var(--ok); }
+    .status.bad { background: #fde7e7; color: var(--bad); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 16px; margin-top: 20px; }
+    label { font-size: 13px; color: var(--muted); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .row > div { flex: 1 1 140px; }
+    input, select, textarea { width: 100%; font: inherit; padding: 8px 10px;
+             border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    textarea { resize: vertical; min-height: 72px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+    .chips button { border: 1px solid var(--line); background: #fff; border-radius: 999px;
+                    padding: 4px 10px; font-size: 13px; cursor: pointer; }
+    .primary { margin-top: 10px; width: 100%; padding: 10px; border: 0; border-radius: 6px;
+               background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+    .primary:disabled { opacity: .6; cursor: wait; }
+    .answer { white-space: pre-wrap; line-height: 1.6; }
+    dl { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 13px; margin: 12px 0 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; word-break: break-all; }
+    .fb { display: flex; gap: 8px; margin-top: 12px; }
+    .fb button { flex: 1; padding: 8px; border: 1px solid var(--line); border-radius: 6px;
+                 background: #fff; cursor: pointer; font: inherit; }
+    .hidden { display: none; }
+    .err { color: var(--bad); }
+    footer { margin-top: 24px; font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>CNU 학사도우미</h1>
+    <p>충남대학교 학사·장학 안내 RAG 챗봇 · 개발 환경 테스트 화면</p>
+    <span id="status" class="status">API 상태 확인 중…</span>
+  </header>
+
+  <section class="card">
+    <div class="row">
+      <div>
+        <label for="admitYear">입학년도 (선택)</label>
+        <select id="admitYear"><option value="">선택 안 함</option></select>
+      </div>
+      <div>
+        <label for="dept">학과 (선택)</label>
+        <input id="dept" placeholder="예: 컴퓨터융합학부">
+      </div>
+    </div>
+    <label for="question">질문</label>
+    <textarea id="question" maxlength="500" placeholder="예: 복수전공 신청 기간이 언제야?"></textarea>
+    <div class="chips" id="chips">
+      <button type="button">수강신청 정정 기간은 언제야?</button>
+      <button type="button">휴학은 최대 몇 학기까지 할 수 있어?</button>
+      <button type="button">교내 장학금 신청 방법 알려줘</button>
+    </div>
+    <button id="send" class="primary">질문 보내기</button>
+  </section>
+
+  <section id="result" class="card hidden">
+    <div id="answer" class="answer"></div>
+    <dl id="details"></dl>
+    <div class="fb" id="fb">
+      <button type="button" data-helpful="true">도움됨</button>
+      <button type="button" data-helpful="false">도움 안 됨</button>
+    </div>
+    <p id="fbMsg" class="hidden"></p>
+  </section>
+
+  <footer>문서 검색과 답변 생성은 다음 단계에서 연결됩니다. 학번·전화번호는 자동으로 가려서 기록합니다.</footer>
+</main>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

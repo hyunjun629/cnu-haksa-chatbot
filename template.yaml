@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CNU 학사도우미 기본 개발 환경 - 문서/웹 S3 버킷, CloudFront(OAC),
+  API Gateway + Lambda 테스트 API, DynamoDB 로그 테이블, 최소 권한 IAM 역할
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedPattern: "[a-z0-9]+"
+    Description: 배포 단계 이름 (리소스 이름 뒤에 붙음)
+  EmbeddingModelId:
+    Type: String
+    Default: amazon.titan-embed-text-v2:0
+    Description: Bedrock 연결 확인에 사용할 임베딩 모델 ID
+
+Globals:
+  Api:
+    OpenApiVersion: "3.0.1"
+  Function:
+    Runtime: python3.12
+    Timeout: 15
+    MemorySize: 256
+
+Resources:
+  # ---------- 문서 저장소 (raw/ 원본, processed/ 정제본) ----------
+  DocsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub cnu-haksa-docs-${AWS::AccountId}-${Stage}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+  # ---------- 웹 프론트엔드 (S3 비공개 + CloudFront OAC) ----------
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub cnu-haksa-web-${AWS::AccountId}-${Stage}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub cnu-haksa-web-oac-${Stage}
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub CNU haksa chatbot web (${Stage})
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: web-s3
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: web-s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # AWS 관리형 캐시 정책: CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOACReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}
+
+  # ---------- 대화·피드백 로그 ----------
+  ChatLogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub cnu-haksa-chatlog-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: requestId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: requestId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  # ---------- 백엔드 API (API Gateway REST + Lambda) ----------
+  ChatApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub cnu-haksa-api-${Stage}
+      StageName: !Ref Stage
+      EndpointConfiguration:
+        Type: REGIONAL
+      Cors:
+        AllowOrigin: "'*'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 10
+
+  ChatFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/cnu-haksa-chat-${Stage}
+      RetentionInDays: 90
+
+  ChatFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ChatFunctionLogGroup
+    Properties:
+      FunctionName: !Sub cnu-haksa-chat-${Stage}
+      Description: CNU haksa chatbot test API (/health, /chat, /feedback)
+      CodeUri: backend/
+      Handler: app.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ChatLogTable
+          EMBED_MODEL_ID: !Ref EmbeddingModelId
+          ALLOWED_ORIGIN: !Sub https://${WebDistribution.DomainName}
+          LOG_TTL_DAYS: "90"
+      # 최소 권한: 로그 테이블 쓰기 + 지정한 임베딩 모델 호출만 허용
+      Policies:
+        - Statement:
+            - Sid: WriteChatLogOnly
+              Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt ChatLogTable.Arn
+            - Sid: InvokeEmbeddingModelOnly
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+      Events:
+        Health:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /health
+            Method: get
+        Chat:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /chat
+            Method: post
+        Feedback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatApi
+            Path: /feedback
+            Method: post
+
+Outputs:
+  WebUrl:
+    Description: 테스트 웹 화면 주소 (CloudFront)
+    Value: !Sub https://${WebDistribution.DomainName}
+  ApiUrl:
+    Description: 백엔드 API 기본 주소
+    Value: !Sub https://${ChatApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+  DocsBucketName:
+    Description: 문서 저장소 버킷
+    Value: !Ref DocsBucket
+  WebBucketName:
+    Description: 웹 정적 파일 버킷
+    Value: !Ref WebBucket
+  DistributionId:
+    Description: CloudFront 배포 ID
+    Value: !Ref WebDistribution
+  ChatLogTableName:
+    Description: 대화·피드백 로그 테이블
+    Value: !Ref ChatLogTable
+  ChatFunctionName:
+    Description: 질의 처리 Lambda 함수
+    Value: !Ref ChatFunction

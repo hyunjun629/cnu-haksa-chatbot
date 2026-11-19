@@ -1,0 +1,21 @@
+# 배포 때 자동 생성되는 파일
+frontend/config.js
+.aws-sam/
+samconfig.toml
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# 편집기·OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 비밀 정보는 절대 커밋하지 않음
+.env
+*.pem
+credentials
