@@ -179,6 +179,12 @@ def test_model_extra_fields(fake_aws, monkeypatch):
     assert fake_aws.llm.converse.call_args.kwargs["additionalModelRequestFields"] == {"thinking": {"type": "disabled"}}
 
 
+def test_answer_markdown_removed(fake_aws):
+    fake_aws.llm.converse.return_value = converse_reply("2022학번은 **총 140학점 이상**을 이수해야 합니다 [1].\n- 전공 72학점 [1]")
+    _, body, _ = call("POST", "/chat", {"question": "졸업 학점"})
+    assert body["answer"] == "2022학번은 총 140학점 이상을 이수해야 합니다 [1].\n전공 72학점 [1]"
+
+
 def test_snippet_hides_markdown():
     raw = "## 2. 수강신청 정정 기간\n- 정정 기간: 3월 2일 ~ 3월 8일\n| 부서 | 전화 |"
     assert app.clean_snippet(raw) == "2. 수강신청 정정 기간 정정 기간: 3월 2일 ~ 3월 8일 부서 전화"
