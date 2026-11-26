@@ -3,12 +3,15 @@
 #   사용법: bash scripts/deploy.sh
 set -euo pipefail
 
-# CloudShell 기본 언어 설정에서 템플릿의 한글 설명이 ??로 깨지지 않도록 UTF-8로 고정
+# 스크립트가 출력하는 한글(동작 확인 결과)을 UTF-8로 처리
 export LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONIOENCODING=utf-8
 
 STACK_NAME="${STACK_NAME:-cnu-haksa-dev}"
 REGION="${REGION:-ap-northeast-2}"
 STAGE="${STAGE:-dev}"
+# 근거 판단 기준값. sam deploy는 지정하지 않은 파라미터를 이전 값으로 유지하므로 매번 명시한다.
+# (scripts/score_check.sh 측정: 관련 질문 최저 0.699, 무관 질문 최고 0.618)
+MIN_SCORE="${MIN_SCORE:-0.65}"
 
 cd "$(dirname "$0")/.."
 
@@ -22,7 +25,7 @@ sam deploy \
   --region "$REGION" \
   --resolve-s3 \
   --capabilities CAPABILITY_IAM \
-  --parameter-overrides "Stage=$STAGE" \
+  --parameter-overrides "Stage=$STAGE" "MinScore=$MIN_SCORE" \
   --no-confirm-changeset \
   --no-fail-on-empty-changeset
 
