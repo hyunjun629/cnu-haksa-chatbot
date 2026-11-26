@@ -1,31 +1,32 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
+# CloudFormation 문자열(Description 등)은 영문으로 둔다. 한글은 sam deploy 후 ?로 저장됨 (docs/debug-log.md 1, 7번)
 Description: >
-  CNU 학사도우미 RAG MVP - 문서/웹 S3 버킷, CloudFront(OAC), API Gateway + Lambda,
-  Bedrock Knowledge Bases(S3 Vectors) 검색, Claude 답변 생성, DynamoDB 로그, 최소 권한 IAM 역할
+  CNU Haksa Assistant RAG MVP - S3 docs/web buckets, CloudFront (OAC), API Gateway + Lambda,
+  Bedrock Knowledge Bases (S3 Vectors) retrieval, Claude answer generation, DynamoDB logs, least-privilege IAM roles
 
 Parameters:
   Stage:
     Type: String
     Default: dev
     AllowedPattern: "[a-z0-9]+"
-    Description: 배포 단계 이름 (리소스 이름 뒤에 붙음)
+    Description: Deployment stage name (suffix of resource names)
   EmbeddingModelId:
     Type: String
     Default: amazon.titan-embed-text-v2:0
-    Description: 문서와 질문을 벡터로 바꾸는 임베딩 모델 ID
+    Description: Embedding model ID for documents and questions
   GenerationModelName:
     Type: String
     Default: anthropic.claude-haiku-4-5-20251001-v1:0
-    Description: 답변 생성 모델 ID (글로벌 교차 리전 추론 프로필 global.<모델 ID>로 호출)
+    Description: Answer generation model ID (invoked through the global.<model ID> cross-Region inference profile)
   ModelExtraFields:
     Type: String
     Default: "{}"
-    Description: 모델별 추가 요청 필드(JSON). 예) Haiku 5.5는 {"thinking":{"type":"disabled"}}
+    Description: Extra model request fields as JSON, e.g. {"thinking":{"type":"disabled"}} for Haiku 5.5
   MinScore:
     Type: String
-    Default: "0.35"
-    Description: 최고 검색 점수가 이 값보다 낮으면 생성 모델을 호출하지 않고 근거 부족으로 안내
+    Default: "0.65"  # scripts/score_check.sh 측정: 관련 질문 최저 0.699, 무관 질문 최고 0.618
+    Description: If the top retrieval score is below this value, the model is not called and a no-basis message is returned
 
 Globals:
   Api:
@@ -340,32 +341,32 @@ Resources:
 
 Outputs:
   WebUrl:
-    Description: 웹 화면 주소 (CloudFront)
+    Description: Web app URL (CloudFront)
     Value: !Sub https://${WebDistribution.DomainName}
   ApiUrl:
-    Description: 백엔드 API 기본 주소
+    Description: Backend API base URL
     Value: !Sub https://${ChatApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
   DocsBucketName:
-    Description: 문서 저장소 버킷
+    Description: Document bucket
     Value: !Ref DocsBucket
   WebBucketName:
-    Description: 웹 정적 파일 버킷
+    Description: Web static files bucket
     Value: !Ref WebBucket
   DistributionId:
-    Description: CloudFront 배포 ID
+    Description: CloudFront distribution ID
     Value: !Ref WebDistribution
   ChatLogTableName:
-    Description: 대화·피드백 로그 테이블
+    Description: Chat and feedback log table
     Value: !Ref ChatLogTable
   ChatFunctionName:
-    Description: 질의 처리 Lambda 함수
+    Description: Chat handler Lambda function
     Value: !Ref ChatFunction
   KnowledgeBaseId:
     Description: Bedrock Knowledge Base ID
     Value: !GetAtt KnowledgeBase.KnowledgeBaseId
   DataSourceId:
-    Description: Knowledge Base 데이터 소스 ID (processed/)
+    Description: Knowledge Base data source ID (processed/)
     Value: !GetAtt DocsDataSource.DataSourceId
   VectorIndexArn:
-    Description: S3 Vectors 인덱스
+    Description: S3 Vectors index ARN
     Value: !GetAtt VectorIndex.IndexArn
