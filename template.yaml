@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  CNU 학사도우미 기본 개발 환경 - 문서/웹 S3 버킷, CloudFront(OAC),
-  API Gateway + Lambda 테스트 API, DynamoDB 로그 테이블, 최소 권한 IAM 역할
+  CNU 학사도우미 RAG MVP - 문서/웹 S3 버킷, CloudFront(OAC), API Gateway + Lambda,
+  Bedrock Knowledge Bases(S3 Vectors) 검색, Claude 답변 생성, DynamoDB 로그, 최소 권한 IAM 역할
 
 Parameters:
   Stage:
@@ -13,15 +13,27 @@ Parameters:
   EmbeddingModelId:
     Type: String
     Default: amazon.titan-embed-text-v2:0
-    Description: Bedrock 연결 확인에 사용할 임베딩 모델 ID
+    Description: 문서와 질문을 벡터로 바꾸는 임베딩 모델 ID
+  GenerationModelName:
+    Type: String
+    Default: anthropic.claude-haiku-4-5-20251001-v1:0
+    Description: 답변 생성 모델 ID (글로벌 교차 리전 추론 프로필 global.<모델 ID>로 호출)
+  ModelExtraFields:
+    Type: String
+    Default: "{}"
+    Description: 모델별 추가 요청 필드(JSON). 예) Haiku 5.5는 {"thinking":{"type":"disabled"}}
+  MinScore:
+    Type: String
+    Default: "0.35"
+    Description: 최고 검색 점수가 이 값보다 낮으면 생성 모델을 호출하지 않고 근거 부족으로 안내
 
 Globals:
   Api:
     OpenApiVersion: "3.0.1"
   Function:
     Runtime: python3.12
-    Timeout: 15
-    MemorySize: 256
+    Timeout: 25
+    MemorySize: 512
 
 Resources:
   # ---------- 문서 저장소 (raw/ 원본, processed/ 정제본) ----------
@@ -46,6 +58,113 @@ Resources:
       NotificationConfiguration:
         EventBridgeConfiguration:
           EventBridgeEnabled: true
+
+  # ---------- 벡터 검색 저장소 (S3 Vectors) ----------
+  VectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    Properties:
+      VectorBucketName: !Sub cnu-haksa-vectors-${AWS::AccountId}-${Stage}
+
+  VectorIndex:
+    Type: AWS::S3Vectors::Index
+    Properties:
+      VectorBucketArn: !GetAtt VectorBucket.VectorBucketArn
+      IndexName: haksa-docs
+      DataType: float32
+      Dimension: 1024
+      DistanceMetric: cosine
+      # 청크 원문과 Bedrock 내부 메타데이터는 필터에 쓰지 않으므로 비필터 키로 지정 (필터용 메타데이터 크기 제한 회피)
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_TEXT
+          - AMAZON_BEDROCK_METADATA
+
+  # ---------- Knowledge Bases (분할·임베딩·검색) ----------
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                AWS:SourceArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*
+      Policies:
+        - PolicyName: kb-least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokeEmbeddingModelOnly
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+              - Sid: ListDocsBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DocsBucket.Arn
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+              - Sid: ReadProcessedDocsOnly
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${DocsBucket.Arn}/processed/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+              - Sid: VectorIndexReadWrite
+                Effect: Allow
+                Action:
+                  - s3vectors:PutVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:DeleteVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:GetIndex
+                Resource: !GetAtt VectorIndex.IndexArn
+
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub cnu-haksa-kb-${Stage}
+      Description: CNU haksa documents (processed/) for RAG retrieval
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+          EmbeddingModelConfiguration:
+            BedrockEmbeddingModelConfiguration:
+              Dimensions: 1024
+              EmbeddingDataType: FLOAT32
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt VectorIndex.IndexArn
+
+  DocsDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !GetAtt KnowledgeBase.KnowledgeBaseId
+      Name: processed-docs
+      Description: Cleaned text and .metadata.json under processed/
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt DocsBucket.Arn
+          InclusionPrefixes:
+            - processed/
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 300
+            OverlapPercentage: 20
 
   # ---------- 웹 프론트엔드 (S3 비공개 + CloudFront OAC) ----------
   WebBucket:
@@ -160,26 +279,45 @@ Resources:
     DependsOn: ChatFunctionLogGroup
     Properties:
       FunctionName: !Sub cnu-haksa-chat-${Stage}
-      Description: CNU haksa chatbot test API (/health, /chat, /feedback)
+      Description: CNU haksa chatbot RAG API (/health, /chat, /feedback)
       CodeUri: backend/
       Handler: app.handler
       Environment:
         Variables:
           TABLE_NAME: !Ref ChatLogTable
-          EMBED_MODEL_ID: !Ref EmbeddingModelId
+          KB_ID: !GetAtt KnowledgeBase.KnowledgeBaseId
+          MODEL_ID: !Sub global.${GenerationModelName}
+          MODEL_EXTRA_FIELDS: !Ref ModelExtraFields
+          MIN_SCORE: !Ref MinScore
+          TOP_K: "5"
+          MAX_TOKENS: "800"
           ALLOWED_ORIGIN: !Sub https://${WebDistribution.DomainName}
           LOG_TTL_DAYS: "90"
-      # 최소 권한: 로그 테이블 쓰기 + 지정한 임베딩 모델 호출만 허용
+      # 최소 권한: 로그 테이블 쓰기, 이 Knowledge Base 검색, 지정한 생성 모델 호출만 허용
       Policies:
         - Statement:
             - Sid: WriteChatLogOnly
               Effect: Allow
               Action: dynamodb:PutItem
               Resource: !GetAtt ChatLogTable.Arn
-            - Sid: InvokeEmbeddingModelOnly
+            - Sid: RetrieveFromThisKnowledgeBase
+              Effect: Allow
+              Action: bedrock:Retrieve
+              Resource: !GetAtt KnowledgeBase.KnowledgeBaseArn
+            # 글로벌 교차 리전 추론: 프로필 + 요청 리전의 모델 + 리전 없는 글로벌 모델 ARN이 모두 필요
+            - Sid: InvokeGlobalInferenceProfile
               Effect: Allow
               Action: bedrock:InvokeModel
-              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+              Resource: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.${GenerationModelName}
+            - Sid: InvokeModelThroughProfileOnly
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${GenerationModelName}
+                - !Sub arn:aws:bedrock:::foundation-model/${GenerationModelName}
+              Condition:
+                StringEquals:
+                  bedrock:InferenceProfileArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.${GenerationModelName}
       Events:
         Health:
           Type: Api
@@ -202,7 +340,7 @@ Resources:
 
 Outputs:
   WebUrl:
-    Description: 테스트 웹 화면 주소 (CloudFront)
+    Description: 웹 화면 주소 (CloudFront)
     Value: !Sub https://${WebDistribution.DomainName}
   ApiUrl:
     Description: 백엔드 API 기본 주소
@@ -222,3 +360,12 @@ Outputs:
   ChatFunctionName:
     Description: 질의 처리 Lambda 함수
     Value: !Ref ChatFunction
+  KnowledgeBaseId:
+    Description: Bedrock Knowledge Base ID
+    Value: !GetAtt KnowledgeBase.KnowledgeBaseId
+  DataSourceId:
+    Description: Knowledge Base 데이터 소스 ID (processed/)
+    Value: !GetAtt DocsDataSource.DataSourceId
+  VectorIndexArn:
+    Description: S3 Vectors 인덱스
+    Value: !GetAtt VectorIndex.IndexArn

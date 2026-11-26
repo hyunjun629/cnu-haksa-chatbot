@@ -6,50 +6,63 @@
   <title>CNU 학사도우미</title>
   <style>
     :root {
-      --bg: #f5f7fa; --card: #ffffff; --text: #1f2933; --muted: #616e7c;
-      --line: #d9e2ec; --accent: #1a5fb4; --ok: #2e7d32; --bad: #c62828;
+      --bg: #f4f6f9; --card: #ffffff; --text: #1f2933; --muted: #5f6b7a;
+      --line: #d9e2ec; --accent: #1a5fb4; --accent-soft: #e8f0fb;
+      --ok: #2e7d32; --warn: #b26a00; --warn-soft: #fff4e5; --bad: #c62828;
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text);
            font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
-    main { max-width: 720px; margin: 0 auto; padding: 32px 16px 48px; }
+    main { max-width: 760px; margin: 0 auto; padding: 28px 16px 48px; }
     header h1 { margin: 0 0 4px; font-size: 24px; }
     header p { margin: 0; color: var(--muted); font-size: 14px; }
-    .status { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
-              font-size: 13px; padding: 4px 10px; border-radius: 999px; background: #e4e7eb; }
+    .status { display: inline-flex; gap: 6px; margin-top: 10px; font-size: 12px;
+              padding: 4px 10px; border-radius: 999px; background: #e4e7eb; }
     .status.ok { background: #e3f2e5; color: var(--ok); }
     .status.bad { background: #fde7e7; color: var(--bad); }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-            padding: 16px; margin-top: 20px; }
+            padding: 16px; margin-top: 18px; }
     label { font-size: 13px; color: var(--muted); }
     .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-    .row > div { flex: 1 1 140px; }
+    .row > div { flex: 1 1 160px; }
     input, select, textarea { width: 100%; font: inherit; padding: 8px 10px;
              border: 1px solid var(--line); border-radius: 6px; background: #fff; }
-    textarea { resize: vertical; min-height: 72px; }
-    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+    textarea { resize: vertical; min-height: 70px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
     .chips button { border: 1px solid var(--line); background: #fff; border-radius: 999px;
-                    padding: 4px 10px; font-size: 13px; cursor: pointer; }
-    .primary { margin-top: 10px; width: 100%; padding: 10px; border: 0; border-radius: 6px;
+                    padding: 5px 11px; font-size: 13px; cursor: pointer; }
+    .chips button:hover { border-color: var(--accent); color: var(--accent); }
+    .primary { margin-top: 12px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
                background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
     .primary:disabled { opacity: .6; cursor: wait; }
-    .answer { white-space: pre-wrap; line-height: 1.6; }
-    dl { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 13px; margin: 12px 0 0; }
-    dt { color: var(--muted); }
-    dd { margin: 0; word-break: break-all; }
+    .q { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+    .answer { line-height: 1.75; white-space: pre-wrap; }
+    .answer sup { color: var(--accent); font-weight: 700; font-size: 11px; margin-left: 1px; }
+    .nobasis { background: var(--warn-soft); border-left: 4px solid var(--warn); padding: 10px 12px; border-radius: 6px; }
+    .contacts { margin: 8px 0 0; padding-left: 18px; font-size: 14px; }
+    h3 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); }
+    .src { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: #fbfcfe; }
+    .src .head { display: flex; gap: 8px; align-items: baseline; }
+    .src .num { background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px;
+                border-radius: 4px; padding: 1px 6px; }
+    .src .title { font-weight: 700; font-size: 14px; }
+    .src .meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .src .snip { font-size: 13px; margin-top: 6px; color: #3e4c59; }
+    .src a { font-size: 12px; color: var(--accent); }
+    .stats { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .fb { display: flex; gap: 8px; margin-top: 12px; }
     .fb button { flex: 1; padding: 8px; border: 1px solid var(--line); border-radius: 6px;
                  background: #fff; cursor: pointer; font: inherit; }
     .hidden { display: none; }
     .err { color: var(--bad); }
-    footer { margin-top: 24px; font-size: 12px; color: var(--muted); }
+    footer { margin-top: 22px; font-size: 12px; color: var(--muted); line-height: 1.6; }
   </style>
 </head>
 <body>
 <main>
   <header>
     <h1>CNU 학사도우미</h1>
-    <p>충남대학교 학사·장학 안내 RAG 챗봇 · 개발 환경 테스트 화면</p>
+    <p>충남대학교 학사·장학 안내 RAG 챗봇 (MVP)</p>
     <span id="status" class="status">API 상태 확인 중…</span>
   </header>
 
@@ -61,7 +74,12 @@
       </div>
       <div>
         <label for="dept">학과 (선택)</label>
-        <input id="dept" placeholder="예: 컴퓨터융합학부">
+        <select id="dept">
+          <option value="">선택 안 함</option>
+          <option>컴퓨터융합학부</option>
+          <option>기계공학부</option>
+          <option>경영학부</option>
+        </select>
       </div>
     </div>
     <label for="question">질문</label>
@@ -69,14 +87,21 @@
     <div class="chips" id="chips">
       <button type="button">수강신청 정정 기간은 언제야?</button>
       <button type="button">휴학은 최대 몇 학기까지 할 수 있어?</button>
-      <button type="button">교내 장학금 신청 방법 알려줘</button>
+      <button type="button">복수전공 신청 자격이 뭐야?</button>
+      <button type="button">교내 장학금 종류 알려줘</button>
+      <button type="button">졸업하려면 몇 학점 들어야 해?</button>
     </div>
     <button id="send" class="primary">질문 보내기</button>
   </section>
 
   <section id="result" class="card hidden">
+    <p class="q" id="echo"></p>
     <div id="answer" class="answer"></div>
-    <dl id="details"></dl>
+    <div id="sourcesWrap" class="hidden">
+      <h3>출처</h3>
+      <div id="sources"></div>
+    </div>
+    <p class="stats" id="stats"></p>
     <div class="fb" id="fb">
       <button type="button" data-helpful="true">도움됨</button>
       <button type="button" data-helpful="false">도움 안 됨</button>
@@ -84,7 +109,10 @@
     <p id="fbMsg" class="hidden"></p>
   </section>
 
-  <footer>문서 검색과 답변 생성은 다음 단계에서 연결됩니다. 학번·전화번호는 자동으로 가려서 기록합니다.</footer>
+  <footer>
+    답변은 등록된 학사·장학 문서만 근거로 만들어지며, 근거가 없으면 담당 부서를 안내합니다.<br>
+    현재 등록된 문서는 개발용 가상 예시 자료입니다. 학번·전화번호는 자동으로 가려서 처리합니다.
+  </footer>
 </main>
 <script src="config.js"></script>
 <script src="app.js"></script>

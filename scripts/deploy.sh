@@ -12,10 +12,10 @@ STAGE="${STAGE:-dev}"
 
 cd "$(dirname "$0")/.."
 
-echo "== 1/5 템플릿 검사 =="
+echo "== 1/6 템플릿 검사 =="
 sam validate --template-file template.yaml --region "$REGION"
 
-echo "== 2/5 인프라 배포 (CloudFormation 스택: $STACK_NAME, 리전: $REGION) =="
+echo "== 2/6 인프라 배포 (CloudFormation 스택: $STACK_NAME, 리전: $REGION) =="
 sam deploy \
   --template-file template.yaml \
   --stack-name "$STACK_NAME" \
@@ -36,30 +36,53 @@ WEB_URL="$(output WebUrl)"
 WEB_BUCKET="$(output WebBucketName)"
 DOCS_BUCKET="$(output DocsBucketName)"
 DIST_ID="$(output DistributionId)"
+KB_ID="$(output KnowledgeBaseId)"
+DS_ID="$(output DataSourceId)"
 
-echo "== 3/5 웹 화면 업로드 (S3 → CloudFront) =="
+echo "== 3/6 웹 화면 업로드 (S3 → CloudFront) =="
 printf 'window.APP_CONFIG = { apiUrl: "%s" };\n' "$API_URL" > frontend/config.js
 aws s3 sync frontend/ "s3://$WEB_BUCKET/" --delete --region "$REGION"
 aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*" \
   --query "Invalidation.Status" --output text
 
-echo "== 4/5 문서 저장소 폴더 구성 (raw/, processed/) + 샘플 문서 업로드 =="
-aws s3api put-object --bucket "$DOCS_BUCKET" --key raw/ --region "$REGION" > /dev/null
-aws s3api put-object --bucket "$DOCS_BUCKET" --key processed/ --region "$REGION" > /dev/null
-aws s3 cp data/sample/ "s3://$DOCS_BUCKET/raw/" --recursive --region "$REGION"
+echo "== 4/6 문서 업로드 (raw/ 원본, processed/ 검색용 텍스트 + 메타데이터) =="
+# 현재 문서는 이미 정제된 텍스트(.md)라서 그대로 processed/에 올린다. (HWP·PDF 변환은 전처리 Lambda 단계에서 추가)
+aws s3 sync data/docs/ "s3://$DOCS_BUCKET/raw/" --delete --region "$REGION"
+aws s3 sync data/docs/ "s3://$DOCS_BUCKET/processed/" --delete --region "$REGION"
 
-echo "== 5/5 동작 확인 =="
+echo "== 5/6 Knowledge Base 동기화 (분할 → 임베딩 → S3 Vectors 적재) =="
+JOB_ID="$(aws bedrock-agent start-ingestion-job --knowledge-base-id "$KB_ID" --data-source-id "$DS_ID" \
+  --region "$REGION" --query "ingestionJob.ingestionJobId" --output text)"
+echo "동기화 작업 ID: $JOB_ID"
+STATUS="STARTING"
+for _ in $(seq 1 60); do
+  STATUS="$(aws bedrock-agent get-ingestion-job --knowledge-base-id "$KB_ID" --data-source-id "$DS_ID" \
+    --ingestion-job-id "$JOB_ID" --region "$REGION" --query "ingestionJob.status" --output text)"
+  echo "  상태: $STATUS"
+  case "$STATUS" in COMPLETE|FAILED|STOPPED) break ;; esac
+  sleep 5
+done
+aws bedrock-agent get-ingestion-job --knowledge-base-id "$KB_ID" --data-source-id "$DS_ID" \
+  --ingestion-job-id "$JOB_ID" --region "$REGION" \
+  --query "ingestionJob.{status:status,statistics:statistics,failureReasons:failureReasons}" --output json
+if [ "$STATUS" != "COMPLETE" ]; then
+  echo "동기화가 완료되지 않았습니다 (상태: $STATUS). 위 failureReasons를 확인하세요." >&2
+  exit 1
+fi
+
+echo "== 6/6 동작 확인 =="
 echo "[GET /health]"
-curl -sS "$API_URL/health"; echo
-echo "[POST /chat]"
+curl -sS "$API_URL/health" | python3 -m json.tool --no-ensure-ascii
+echo "[POST /chat] 2024학번 · 컴퓨터융합학부 졸업요건 질문"
 curl -sS -X POST "$API_URL/chat" -H "Content-Type: application/json" \
-  -d '{"question":"휴학은 최대 몇 학기까지 할 수 있어? 제 학번은 202412345입니다","admitYear":"2024"}'
-echo
+  -d '{"question":"졸업하려면 몇 학점을 들어야 해? 제 학번은 202412345입니다","admitYear":"2024","dept":"컴퓨터융합학부"}' \
+  | python3 -m json.tool --no-ensure-ascii
 
 cat <<EOF
 
 배포 완료
-  웹 화면 : $WEB_URL   (CloudFront 첫 배포는 몇 분 걸릴 수 있음)
-  API     : $API_URL
-  문서 버킷: s3://$DOCS_BUCKET
+  웹 화면   : $WEB_URL
+  API       : $API_URL
+  문서 버킷 : s3://$DOCS_BUCKET
+  Knowledge Base ID: $KB_ID
 EOF
